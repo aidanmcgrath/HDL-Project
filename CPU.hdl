@@ -1,0 +1,122 @@
+//Aidan McGrath     UIN 228008747
+
+/**
+ * The Hack CPU (Central Processing unit), consisting of an ALU,
+ * two registers named A and D, and a program counter named PC.
+ * The CPU is designed to fetch and execute instructions written in 
+ * the Hack machine language. In particular, functions as follows:
+ * Executes the inputted instruction according to the Hack machine 
+ * language specification. The D and A in the language specification
+ * refer to CPU-resident registers, while M refers to the external
+ * memory location addressed by A, i.e. to Memory[A]. The inM input 
+ * holds the value of this location. If the current instruction needs 
+ * to write a value to M, the value is placed in outM, the address 
+ * of the target location is placed in the addressM output, and the 
+ * writeM control bit is asserted. (When writeM==0, any value may 
+ * appear in outM). The outM and writeM outputs are combinational: 
+ * they are affected instantaneously by the execution of the current 
+ * instruction. The addressM and pc outputs are clocked: although they 
+ * are affected by the execution of the current instruction, they commit 
+ * to their new values only in the next time step. If reset==1 then the 
+ * CPU jumps to address 0 (i.e. pc is set to 0 in next time step) rather 
+ * than to the address resulting from executing the current instruction. 
+ */
+
+CHIP CPU {
+
+    IN  inM[16],         // M value input  (M = contents of RAM[A])
+        instruction[16], // Instruction for execution
+        reset;           // Signals whether to re-start the current
+                         // program (reset==1) or continue executing
+                         // the current program (reset==0).
+
+    OUT outM[16],        // M value output
+        writeM,          // Write to M? 
+        addressM[15],    // Address in data memory (of M)
+        pc[15];          // address of next instruction
+
+    PARTS:
+    // Put your code here:
+	
+	//First we need to determine the type of instruction (C or A). 
+	//According to the lecture slides, if instruction[15] = 0, it is A instruction, if it is 1, it is C instruction. Instruction[15] is called op code
+	
+	Mux16(a= instruction, b = ALUoutput, sel = instruction[15], out = firstMuxOutput);
+	
+	
+	//If instruction[5] = 1, then the destination is the A register. If instruction[5] = 0 AND instruction[4] = 1, then the destination is the D register
+	//First we will check if the destination is the A register
+	
+	Not(in = instruction[15], out = notOP);
+	
+	//If A instruction or destination A register, load A
+	
+	Or(a = notOP, b = instruction[5], out = loadA);
+	ARegister(in = firstMuxOutput, load = loadA, out = AregOutput);
+	
+	//Now we will check if the destination is the D register
+	//If both instruction[15] and instruction[4] are 1, then we will load to D register
+	
+	And(a = instruction[15], b = instruction[4], out = loadD);
+	DRegister(in = ALUoutput, load = loadD, out = DregOutput);
+	
+	//Now we implement the ALU, which will do the actual operations
+	//For this we simply have to plug in instruction[11..6] into the ALU chip in the appropriate positions
+	//We also need to determine if A or M is accessed, which we do here:
+	
+	And(a = instruction[15], b = instruction[12], out = AMselector);
+	Mux16(a = AregOutput, b = inM, sel = AMselector, out = AM);
+	
+	//Finally we plug in the values to the ALU chip
+	
+	ALU(x = DregOutput, y = AM, out = ALUoutput,  zx = instruction[11], nx = instruction[10], zy = instruction[9], ny = instruction[8], f = instruction[7], no = instruction[6], zr = zrOutput, ng = ngOutput);
+	
+	
+	//Output for writing to memory:
+	//Only need out[0..14] to output to addressM since addressM is only 15 bits
+	
+	Or16(a = AregOutput, b = false, out[0..14] = addressM);
+	Or16(a = ALUoutput, b = false, out = outM);
+	
+	//instruction[3] corresponds to writeM 
+	And(a = instruction[15], b = instruction[3], out = writeM);
+	
+	
+	//Now we must implement PC and determine whether to load PC with A register
+	//Determine if output is zero and we should jump if zero (jeq)
+	
+	And(a = zrOutput, b = instruction[1], out = jeq);
+	
+	//If output is zero or negative, it is not positive
+	
+	Or(a = zrOutput, b = ngOutput, out = notPositive);
+	Not(in = notPositive, out = positive);
+	
+	//If output is positive and jump if positive:
+	
+	And(a = positive, b = instruction[0], out = jgt);
+	
+	//Jump greater than or equal
+	
+	Or(a = jeq, b = jgt, out = jge);
+	
+	//Determine if output is negative and we should jump if negative (jle)
+	
+	And(a = ngOutput, b = instruction[2], out = jlt);
+	
+	//PC will only load if we jump AND it is C instruction (instruction[15] = 1)
+	
+	Or(a = jlt, b = jge, out = jump);
+	And(a = instruction[15], b = jump, out = loadPC);
+	
+	//If we do not loadPC, then we will incrementPC
+	
+	Not(in = loadPC, out = incrementPC);
+	
+	//Finally, implementation of pc
+	
+	PC(in = AregOutput, inc = incrementPC, load = loadPC, reset = reset, out[0..14] = pc);
+	
+	
+	
+}
